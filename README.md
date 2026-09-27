@@ -25,25 +25,25 @@ Every run is a single typed `RunState` Pydantic object that flows through pure f
 
 ```mermaid
 flowchart TD
-    User([User Query]) --> API[FastAPI POST /research]
-    API --> Redis[(Redis Durable Store)]
-    API --> PlanNode[1. Planner Agent]
+    User(["User Query"]) --> API["FastAPI POST /research"]
+    API --> Redis[("Redis Durable Store")]
+    API --> PlanNode["1. Planner Agent"]
     
-    subgraph Execution_Pipeline [LangGraph Orchestrated Pipeline]
-        PlanNode -->|Decomposed Sub-Questions| ResNode[2. Researcher Agent]
-        ResNode <-->|Live Search & Body Extraction| Tavily[Tavily Search + Trafilatura]
-        ResNode -->|Atomic Finding Records| SupNode{3. Supervisor Review}
+    subgraph Execution_Pipeline ["LangGraph Orchestrated Pipeline"]
+        PlanNode -->|"Decomposed Sub-Questions"| ResNode["2. Researcher Agent"]
+        ResNode <-->|"Live Search & Extraction"| Tavily["Tavily Search + Trafilatura"]
+        ResNode -->|"Atomic Finding Records"| SupNode{"3. Supervisor Review"}
         
-        SupNode -- Evidence Gap & Revision Count < 1 -->|Targeted Sub-Question| ResNode
-        SupNode -- Full Coverage or Budget Limit --> WriteNode[4. Synthesis Writer]
+        SupNode -->|"Evidence Gap (Max 1 Loop)"| ResNode
+        SupNode -->|"Full Coverage or Budget Limit"| WriteNode["4. Synthesis Writer"]
     end
 
-    WriteNode --> ValNode[5. Citation Validation Engine]
-    ValNode -->|100% Resolved Citations| Done[Status: Done & Report Persisted]
-    ValNode -.->|Unknown Finding ID / URL Mismatch| Alert[Status: Validation Alert]
+    WriteNode --> ValNode["5. Citation Validation Engine"]
+    ValNode -->|"100% Resolved Citations"| Done["Status: Done & Report Persisted"]
+    ValNode -.->|"Unknown Finding ID / URL Mismatch"| Alert["Status: Validation Alert"]
     
     Done --> Redis
-    Redis --> UI([Synthetix Live Research Studio])
+    Redis --> UI(["Synthetix Live Research Studio"])
 ```
 
 ---
