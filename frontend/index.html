@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Synthetix — Autonomous Multi-Agent Research Platform</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+  <!-- Subtle Mathematical Canvas & Background Grid -->
+  <div class="math-background-grid"></div>
+  <div class="math-axes">
+    <svg viewBox="0 0 1200 350" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M50 175H1150" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4 4" />
+      <path d="M600 20V330" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4 4" />
+      <path d="M 50 175 Q 187.5 40 325 175 T 600 175 T 875 175 T 1150 175" stroke="rgba(255, 77, 45, 0.4)" stroke-width="2.5" fill="none" />
+      <path d="M 50 175 Q 187.5 310 325 175 T 600 175 T 875 175 T 1150 175" stroke="rgba(99, 102, 241, 0.3)" stroke-width="2" fill="none" />
+      <text x="60" y="165" fill="#94a3b8" font-family="JetBrains Mono" font-size="12">-2π</text>
+      <text x="325" y="165" fill="#94a3b8" font-family="JetBrains Mono" font-size="12">-π</text>
+      <text x="605" y="165" fill="#ff4d2d" font-family="JetBrains Mono" font-size="12" font-weight="700">0</text>
+      <text x="875" y="165" fill="#94a3b8" font-family="JetBrains Mono" font-size="12">π</text>
+      <text x="1120" y="165" fill="#94a3b8" font-family="JetBrains Mono" font-size="12">2π</text>
+    </svg>
+  </div>
+
+  <!-- Navigation Bar -->
+  <nav class="navbar">
+    <div class="nav-container">
+      <a href="#" class="logo-group">
+        <div class="logo-badge">S</div>
+        <div class="brand-text">
+          <span class="brand-title">Synthetix</span>
+          <span class="brand-subtitle">Autonomous Research</span>
+        </div>
+      </a>
+
+      <ul class="nav-links">
+        <li><button class="nav-item-btn active" onclick="scrollToSection('hero')">Search</button></li>
+        <li><button class="nav-item-btn" onclick="scrollToSection('studio')">Research Studio</button></li>
+        <li><button class="nav-item-btn" onclick="scrollToSection('history-section')">Saved Reports</button></li>
+        <li><button class="nav-item-btn" onclick="scrollToSection('trace-section')">Live Activity</button></li>
+      </ul>
+
+      <div class="nav-actions">
+        <button class="btn-cta" onclick="focusSearch()">New Research →</button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content Wrapper -->
+  <main class="main-wrapper">
+
+    <!-- ================= HERO SEARCH SECTION ================= -->
+    <section id="hero" class="hero-section">
+      <div class="hero-left">
+        <div class="tag-pill">
+          <span class="badge-dot"></span>
+          <span>AUTONOMOUS MULTI-AGENT INTELLIGENCE</span>
+        </div>
+
+        <h1 class="hero-title">
+          Deep Research &amp; <br />
+          <span class="gradient-highlight">Fact-Checked Synthesis</span> <br />
+          at Machine Speed
+        </h1>
+
+        <div class="hero-description-card">
+          Ask any complex question. Synthetix decomposes your query into focused sub-hypotheses, searches the live web for verified sources, critically reviews evidence gaps, and drafts a comprehensive cited report.
+        </div>
+
+        <div class="hero-search-box">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input 
+            type="text" 
+            id="queryInput" 
+            class="hero-search-input" 
+            placeholder="Enter any research topic (e.g. What makes multi-agent LLM systems hard in production?)"
+            value="What makes multi-agent LLM systems hard to put into production?"
+          />
+          <button id="startResearchBtn" class="btn-cta" onclick="startResearch()">
+            <span>Initiate Run</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+
+        <div class="hero-presets">
+          <span style="font-weight: 600;">Popular topics:</span>
+          <button class="preset-chip" onclick="setPreset('What makes multi-agent LLM systems hard to put into production?')">Production Multi-Agent Bottlenecks</button>
+          <button class="preset-chip" onclick="setPreset('How does Redis state persistence compare to Postgres for long-running AI pipelines?')">Redis vs Postgres for Agent State</button>
+          <button class="preset-chip" onclick="setPreset('What are the key architectural tradeoffs between LangGraph and Autogen for multi-agent workflows?')">LangGraph vs AutoGen Tradeoffs</button>
+          <button class="preset-chip" onclick="setPreset('Why do LLM reflection loops risk infinite token degradation without explicit budget guards?')">Token Budget Guardrails</button>
+        </div>
+      </div>
+
+      <div class="hero-right">
+        <div class="isometric-container">
+          <!-- 3D Pipeline Stack -->
+          <div class="iso-card iso-card-1" onclick="scrollToSection('studio')">
+            <div class="iso-card-header">
+              <span class="iso-card-title">1. Strategic Planning</span>
+              <span class="iso-badge">Step 1</span>
+            </div>
+            <div class="iso-card-body">
+              Decomposes broad questions into targeted, hypothesis-driven sub-questions.
+            </div>
+          </div>
+
+          <div class="iso-card iso-card-2" onclick="scrollToSection('studio')">
+            <div class="iso-card-header">
+              <span class="iso-card-title">2. Live Web Extraction</span>
+              <span class="iso-badge">Step 2</span>
+            </div>
+            <div class="iso-card-body">
+              Gathers authoritative source documents and extracts verbatim evidence records.
+            </div>
+          </div>
+
+          <div class="iso-card iso-card-3" onclick="scrollToSection('studio')">
+            <div class="iso-card-header">
+              <span class="iso-card-title">3. Critical Review</span>
+              <span class="iso-badge">Step 3</span>
+            </div>
+            <div class="iso-card-body">
+              Audits evidence completeness and directs targeted follow-up queries.
+            </div>
+          </div>
+
+          <div class="iso-card iso-card-4" onclick="scrollToSection('studio')">
+            <div class="iso-card-header">
+              <span class="iso-card-title">4. Cited Synthesis</span>
+              <span class="iso-badge">Step 4</span>
+            </div>
+            <div class="iso-card-body">
+              Produces a polished Markdown report where every key claim is linked to source provenance.
+            </div>
+          </div>
+
+          <!-- Live Status Floating Chip -->
+          <div class="telemetry-chip-float">
+            <div class="telemetry-row">
+              <span>CITATION INTEGRITY:</span>
+              <span class="telemetry-val">100% VERIFIED</span>
+            </div>
+            <div class="telemetry-row">
+              <span>LIVE RETRIEVAL:</span>
+              <span class="telemetry-val">ACTIVE WEB SEARCH</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= LIVE RESEARCH STUDIO ================= -->
+    <section id="studio" class="studio-section">
+      <!-- Toolbar -->
+      <div class="studio-toolbar">
+        <div class="studio-toolbar-left">
+          <h3 class="studio-title">
+            <span>Research Studio</span>
+          </h3>
+          <span class="run-id-badge" id="currentRunIdBadge">Session: Ready</span>
+        </div>
+
+        <div class="studio-toolbar-right">
+          <button class="btn-secondary" onclick="copyCurrentRunId()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            <span>Copy Session ID</span>
+          </button>
+          <button class="btn-secondary" id="resumeBtn" onclick="resumeCurrentRun()" style="display: none;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            <span>Resume</span>
+          </button>
+          <button class="btn-cta" onclick="focusSearch()">
+            <span>New Search</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Stepper -->
+      <div class="pipeline-stepper">
+        <div class="step-node" id="step-planning">
+          <div class="step-icon-wrap">1</div>
+          <span class="step-name">Planning</span>
+          <span class="step-status-text" id="step-planning-status">Pending</span>
+        </div>
+        <div class="step-node" id="step-researching">
+          <div class="step-icon-wrap">2</div>
+          <span class="step-name">Searching</span>
+          <span class="step-status-text" id="step-researching-status">Pending</span>
+        </div>
+        <div class="step-node" id="step-reviewing">
+          <div class="step-icon-wrap">3</div>
+          <span class="step-name">Reviewing</span>
+          <span class="step-status-text" id="step-reviewing-status">Pending</span>
+        </div>
+        <div class="step-node" id="step-writing">
+          <div class="step-icon-wrap">4</div>
+          <span class="step-name">Synthesizing</span>
+          <span class="step-status-text" id="step-writing-status">Pending</span>
+        </div>
+        <div class="step-node" id="step-done">
+          <div class="step-icon-wrap">5</div>
+          <span class="step-name">Complete</span>
+          <span class="step-status-text" id="step-done-status">Pending</span>
+        </div>
+      </div>
+
+      <!-- Telemetry Counters Bar -->
+      <div class="telemetry-bar">
+        <div class="tele-metric">
+          <div class="tele-label">
+            <span>Tokens Used</span>
+            <span id="teleTokensText">0 / 150,000</span>
+          </div>
+          <div class="tele-val" id="teleTokensVal">0</div>
+          <div class="tele-bar-bg"><div class="tele-bar-fill" id="teleTokensBar"></div></div>
+        </div>
+
+        <div class="tele-metric">
+          <div class="tele-label">
+            <span>Web Searches</span>
+            <span id="teleSearchesText">0 / 15</span>
+          </div>
+          <div class="tele-val" id="teleSearchesVal">0</div>
+          <div class="tele-bar-bg"><div class="tele-bar-fill" id="teleSearchesBar"></div></div>
+        </div>
+
+        <div class="tele-metric">
+          <div class="tele-label">
+            <span>Extracted Findings</span>
+            <span id="teleFindingsText">0 records</span>
+          </div>
+          <div class="tele-val" id="teleFindingsVal">0</div>
+          <div class="tele-bar-bg"><div class="tele-bar-fill" id="teleFindingsBar" style="background: #0284c7;"></div></div>
+        </div>
+
+        <div class="tele-metric">
+          <div class="tele-label">
+            <span>Evidence Reviews</span>
+            <span id="teleRevisionsText">Max 1 review</span>
+          </div>
+          <div class="tele-val" id="teleRevisionsVal">0 / 1</div>
+          <div class="tele-bar-bg"><div class="tele-bar-fill" id="teleRevisionsBar" style="background: #d97706;"></div></div>
+        </div>
+      </div>
+
+      <!-- Split Studio Body -->
+      <div class="studio-body">
+        <!-- Left Panel: Sub-Questions & Extracted Evidence Stream -->
+        <div class="studio-panel panel-left">
+          <div class="panel-header">
+            <h4 class="panel-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+              <span>Research Hypotheses &amp; Plan</span>
+            </h4>
+            <span class="pill-sm" id="subQuestionsCount">0 items</span>
+          </div>
+
+          <div class="sub-questions-list" id="subQuestionsList">
+            <div style="color: var(--text-light); font-size: 0.88rem; font-style: italic; padding: 1rem 0;">
+              Enter a query and click "Initiate Run" to see the strategic sub-question breakdown here in real-time.
+            </div>
+          </div>
+
+          <div class="panel-header" style="margin-top: 2rem;">
+            <h4 class="panel-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <span>Extracted Evidence &amp; Sources</span>
+            </h4>
+            <span class="pill-sm" id="findingsCountBadge">0 extracted</span>
+          </div>
+
+          <div class="findings-container" id="findingsList">
+            <div style="color: var(--text-light); font-size: 0.88rem; font-style: italic; padding: 1rem 0;">
+              Extracted facts and source links will stream live as web pages are analyzed.
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Panel: Synthesized Final Report -->
+        <div class="studio-panel panel-right">
+          <div class="panel-header">
+            <h4 class="panel-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+              <span>Synthesized Research Report</span>
+            </h4>
+            <div style="display: flex; gap: 0.5rem;">
+              <button class="btn-secondary" onclick="copyReportMarkdown()">Copy Markdown</button>
+              <button class="btn-secondary" onclick="exportReportJSON()">JSON</button>
+            </div>
+          </div>
+
+          <div id="reportContainer" class="report-view">
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 350px; color: var(--text-light); text-align: center;">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 1rem; opacity: 0.5;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+              <p style="font-weight: 600; font-size: 1rem; color: var(--text-muted); margin-bottom: 0.25rem;">No Report Generated Yet</p>
+              <p style="font-size: 0.85rem; max-width: 320px;">Start a new research investigation or choose a saved report below.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= SAVED RESEARCH RUNS ================= -->
+    <section id="history-section" class="recent-runs-card">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <div>
+          <h3 style="font-family: var(--font-display); font-size: 1.35rem; font-weight: 700;">Saved Research Reports</h3>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">
+            Quickly reopen any past research session with full source citations.
+          </p>
+        </div>
+        <button class="btn-secondary" onclick="loadRecentRuns()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          <span>Refresh List</span>
+        </button>
+      </div>
+
+      <div class="recent-runs-list" id="recentRunsList">
+        <!-- Loaded via JavaScript -->
+        <div style="color: var(--text-light); font-size: 0.85rem; padding: 1rem 0;">Loading past sessions...</div>
+      </div>
+    </section>
+
+    <!-- ================= LIVE ACTIVITY & TRACE LOGS ================= -->
+    <section id="trace-section" class="trace-container">
+      <div class="trace-header">
+        <div>
+          <h3 class="trace-title">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ff4d2d" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            <span>Live Activity &amp; Audit Log</span>
+          </h3>
+          <p style="font-size: 0.82rem; color: var(--text-light); margin-top: 0.25rem;">
+            Real-time timeline of multi-agent decisions, web searches, and token usage.
+          </p>
+        </div>
+        <button class="btn-secondary" style="background: rgba(255, 255, 255, 0.08); color: #fff; border-color: rgba(255, 255, 255, 0.15);" onclick="refreshTrace()">
+          Refresh Activity
+        </button>
+      </div>
+
+      <div class="trace-timeline" id="traceTimeline">
+        <div class="trace-step">
+          <div class="trace-dot"></div>
+          <div class="trace-step-top">
+            <span class="trace-node-badge node-api">System Idle</span>
+            <span class="trace-timestamp">Ready</span>
+          </div>
+          <div class="trace-note">Start a research query to view the live execution log.</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ================= PROVENANCE MODAL ================= -->
+  <div class="modal-overlay" id="provenanceModal" onclick="closeProvenanceModal(event)">
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-title" id="modalTitle">Citation Provenance</div>
+        <button class="modal-close" onclick="closeProvenanceModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBody">
+        <!-- Injected via JavaScript -->
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
