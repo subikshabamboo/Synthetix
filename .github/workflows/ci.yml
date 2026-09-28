@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # THEORY: the suite is hermetic — every LLM call is mocked at the
+    # module boundary (call_structured), search uses stub backends, and
+    # Redis runs as a real service here. No API keys are needed, so CI
+    # proves the pipeline's logic (schemas, graph routing, budgets,
+    # persistence, citation validation) without spending a single token.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      REDIS_URL: redis://localhost:6379/0
+      # Placeholder values: the suite never touches the real APIs, but
+      # llm.py/_get_client asserts a non-placeholder key at client build
+      # time, and tools/search.py asserts TAVILY_API_KEY exists. Real
+      # calls are impossible from tests by construction.
+      GEMINI_API_KEY: ci-placeholder-not-a-real-key
+      TAVILY_API_KEY: tvly-ci-placeholder
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run test suite
+        run: python -m pytest -v --tb=short
+
+      - name: Smoke-test app import
+        run: python -c "from api.main import app; print('FastAPI app imports cleanly:', app.title)"

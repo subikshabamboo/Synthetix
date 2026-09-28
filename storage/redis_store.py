@@ -53,11 +53,23 @@ def _key(run_id: str) -> str:
     return f"run:{run_id}"
 
 
+INDEX_KEY = "runs:index"  # sorted set: member=run_id, score=started_at epoch
+
+
 def save_state(state: RunState) -> None:
     # No TTL: the store is the durable record of every run, the source of
     # resume-on-crash, and the "Saved Research Reports" list in the UI.
     # Expiring keys would silently corrupt all three.
-    _r().set(_key(state.run_id), state.model_dump_json())
+    p = _r().pipeline(transaction=True)
+    p.set(_key(state.run_id), state.model_dump_json())
+    # THEORY: maintain a sorted-set index (run_id -> started_at epoch) so
+    # "recent runs" is one ZREVRANGE instead of scanning the whole keyspace
+    # and parsing every blob (which was O(total_runs) per UI refresh).
+    # Writes stay atomic with the state snapshot; index membership is
+    # idempotent, so replays and resumes don't corrupt ordering.
+    if state.budget and state.budget.started_at:
+        p.zadd(INDEX_KEY, {state.run_id: state.budget.started_at.timestamp()})
+    p.execute()
 
 
 def ping() -> bool:
@@ -117,7 +129,15 @@ def run_and_persist(run_id: str) -> RunState:
         final_state_dict = step_state_dict
         save_state(RunState.model_validate(final_state_dict))
 
-    return RunState.model_validate(final_state_dict)
+    final = RunState.model_validate(final_state_dict)
+    # Stamp the terminal timestamp once, at the terminal transition, so
+    # measured end-to-end duration (finished_at - budget.started_at) is
+    # real data instead of a README claim. Idempotent: never overwritten
+    # on later re-entries of an already-finished run.
+    if final.status in ("done", "failed") and final.finished_at is None:
+        final.finished_at = datetime.now(timezone.utc)
+        save_state(final)
+    return final
 
 
 def _get_run_timestamp(s: RunState) -> datetime:
@@ -131,30 +151,59 @@ def _get_run_timestamp(s: RunState) -> datetime:
 
 def list_recent_runs(limit: int = 15) -> list[RunState]:
     """
-    Scans for 'run:*' keys and returns the most recent runs (parsed as RunState).
+    Returns the most recent runs, newest first, via the sorted-set index —
+    O(log N + limit) instead of the old O(total keyspace) scan-and-parse.
+    Self-heals: runs persisted before the index existed (or writes that
+    bypassed save_state) are lazily re-indexed on the first read.
     """
+    r = _r()
     try:
-        # scan_iter instead of KEYS: KEYS blocks the Redis event loop for
-        # the full keyspace scan; SCAN increments incrementally and keeps
-        # the server responsive as the run history grows.
-        keys = list(_r().scan_iter(match="run:*", count=100))
+        run_ids = r.zrevrange(INDEX_KEY, 0, limit - 1)
     except Exception:
         return []
 
     runs: list[RunState] = []
-    for k in keys:
-        raw = _r().get(k)
-        if raw:
-            try:
-                runs.append(RunState.model_validate(json.loads(raw)))
-            except Exception:
-                continue
+    stale_members: list[str] = []
+    for rid in run_ids:
+        raw = r.get(_key(rid))
+        if raw is None:
+            stale_members.append(rid)  # indexed but expired/deleted elsewhere
+            continue
+        try:
+            runs.append(RunState.model_validate(json.loads(raw)))
+        except Exception:
+            stale_members.append(rid)
+            continue
 
-    runs.sort(
-        key=_get_run_timestamp,
-        reverse=True,
-    )
-    return runs[:limit]
+    if stale_members:
+        r.zrem(INDEX_KEY, *stale_members)
+
+    if len(runs) < limit:
+        # Legacy rebuild: pick up any run: keys missing from the index
+        # (created before the index, or written around save_state).
+        try:
+            indexed = set(r.zrange(INDEX_KEY, 0, -1))
+            for k in r.scan_iter(match="run:*", count=100):
+                rid = k.split(":", 1)[1]
+                if rid not in indexed:
+                    raw = r.get(k)
+                    if raw:
+                        try:
+                            s = RunState.model_validate(json.loads(raw))
+                        except Exception:
+                            continue
+                        save_state(s)  # re-index via the normal path
+                        runs.append(s)
+        except Exception:
+            pass
+
+        runs.sort(
+            key=_get_run_timestamp,
+            reverse=True,
+        )
+        runs = runs[:limit]
+
+    return runs
 
 
 

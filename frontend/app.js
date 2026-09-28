@@ -5,6 +5,7 @@
 
 let currentRunId = null;
 let pollTimer = null;
+let eventSource = null;
 let activeRunData = null;
 
 // Initial bootstrap
@@ -97,8 +98,8 @@ async function startResearch() {
     resetStudioView();
     scrollToSection("studio");
 
-    // Start polling
-    startPolling(currentRunId);
+    // Follow the run: SSE push with polling fallback
+    followRun(currentRunId);
     
     // Refresh recent runs list after a brief moment
     setTimeout(loadRecentRuns, 1000);
@@ -109,6 +110,70 @@ async function startResearch() {
     startBtn.disabled = false;
     startBtn.innerHTML = `<span>Initiate Run</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
   }
+}
+
+function stopLiveUpdates() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+}
+
+/**
+ * Follow a run via SSE (push) with automatic polling fallback.
+ *
+ * THEORY: EventSource is the primary channel — the server pushes state
+ * transitions the moment Redis sees them, so the stepper moves in step
+ * with the actual pipeline instead of on a blind 1.5s cadence. EventSource
+ * auto-reconnects on network blips; if SSE is fundamentally unavailable
+ * (old proxy, non-200 first response) we degrade to the polling loop,
+ * which remains fully functional. Only one channel is ever active.
+ */
+function followRun(runId) {
+  stopLiveUpdates();
+
+  if (typeof EventSource !== "undefined") {
+    const es = new EventSource(`/research/${runId}/stream`);
+    eventSource = es;
+
+    es.addEventListener("state", (ev) => {
+      try {
+        const state = JSON.parse(ev.data);
+        activeRunData = state;
+        renderRunState(state);
+        const terminal = state.status === "done" || state.status === "failed" ||
+          state.status === "failed_citation_validation";
+        if (terminal) {
+          stopLiveUpdates();
+          loadRecentRuns();
+        }
+      } catch (e) {
+        console.error("Bad SSE payload:", e);
+      }
+    });
+
+    es.addEventListener("gone", () => {
+      stopLiveUpdates();
+    });
+
+    es.onerror = () => {
+      // EventSource retries on its own for transient errors; a hard
+      // failure (e.g. proxy that can't stream) surfaces here. Give up
+      // after the first error and fall back to polling.
+      if (es.readyState === EventSource.CLOSED) {
+        stopLiveUpdates();
+        startPolling(runId);
+      }
+    };
+    return;
+  }
+
+  // No EventSource support at all: plain polling.
+  startPolling(runId);
 }
 
 /**
@@ -150,6 +215,16 @@ async function pollRunStatus(runId) {
   } catch (err) {
     console.error("Error polling run status:", err);
   }
+}
+
+/**
+ * Format a duration (seconds) as "42s" or "1m 23s"
+ */
+function formatDuration(seconds) {
+  if (seconds == null) return "";
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 /**
@@ -501,6 +576,7 @@ async function loadRecentRuns() {
             <span>⚡ ${r.tokens_used.toLocaleString()} tok</span>
             <span>🔍 ${r.searches_used} searches</span>
             <span>📑 ${r.findings_count} findings</span>
+            ${r.duration_seconds != null ? `<span>⏱ ${formatDuration(r.duration_seconds)}${r.status === "done" || r.status === "failed" ? "" : "…"}</span>` : ""}
           </div>
         </div>
       `;
@@ -518,7 +594,7 @@ async function loadRunById(runId) {
   currentRunId = runId;
   scrollToSection("studio");
   resetStudioView();
-  startPolling(runId);
+  followRun(runId);
 }
 
 /**
@@ -529,7 +605,7 @@ async function resumeCurrentRun() {
   try {
     const res = await fetch(`/research/${currentRunId}/resume`, { method: "POST" });
     if (res.ok) {
-      startPolling(currentRunId);
+      followRun(currentRunId);
     }
   } catch (err) {
     alert(`Resume failed: ${err.message}`);

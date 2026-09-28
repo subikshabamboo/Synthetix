@@ -181,3 +181,7 @@ class RunState(BaseModel):
     revision_count: int = 0  # THEORY (Phase 2): "allow the reviewer to send
     # work back exactly once." This counter is what makes that a hard rule
     # instead of a hope — the Supervisor checks it before looping back.
+    # Terminal timestamp (set when status becomes done/failed). Measured
+    # end-to-end duration = finished_at - budget.started_at; exposed via
+    # the API so the "35-55s" README claim is checkable, not folklore.
+    finished_at: datetime | None = None

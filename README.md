@@ -1,6 +1,8 @@
 # Synthetix — Autonomous Multi-Agent Research Platform
 
-> An autonomous multi-agent research pipeline orchestrated with LangGraph and Redis that reduces multi-source deep research from 15 minutes of manual browsing to under 45 seconds (at nominal Gemini capacity; the 240s wall-clock guardrail absorbs provider 503 storms) with 100% programmatic citation verification across 41 passing tests.
+> An autonomous multi-agent research pipeline orchestrated with LangGraph and Redis that reduces multi-source deep research from 15 minutes of manual browsing to under 45 seconds (at nominal Gemini capacity; the 240s wall-clock guardrail absorbs provider 503 storms) with 100% programmatic citation verification across 55 passing tests.
+
+[![CI](https://github.com/subikshabamboo/Synthetix/actions/workflows/ci.yml/badge.svg)](https://github.com/subikshabamboo/Synthetix/actions/workflows/ci.yml)
 
 ![Synthetix Studio Overview](assets/synthetix_preview.png)
 
@@ -17,6 +19,8 @@
 | **Citation Integrity** | 100% verified against raw sources | Intercepts & rejects fabricated claims |
 | **Provider Fault Tolerance** | Survives Gemini 503 storms + per-sub-question LLM crashes | Exponential backoff, model fallback, structured error results |
 | **Resumability** | Instant resume from last node (fresh wall-clock budget on explicit resume) | Zero duplicate tokens on crash/retry |
+| **Live Progress** | SSE push of every state transition (polling fallback built in) | No blind 1.5s refresh cadence |
+| **Cost Guardrails** | Optional bearer-token auth + per-IP sliding-window rate limiting | Off by default for local dev, one env var to arm |
 
 ---
 
@@ -105,6 +109,11 @@ GEMINI_API_KEY=AIzaSy...              # Google AI Studio API Key
 GEMINI_MODEL=gemini-flash-latest      # Model selection
 TAVILY_API_KEY=tvly-...               # Tavily Search API Key
 REDIS_URL=redis://localhost:6379/0    # Redis Connection URL
+
+# Optional production guards (both default off for local dev):
+# API_AUTH_TOKEN=my-secret-token       # -> POST /research* requires 'Authorization: Bearer my-secret-token'
+# RATE_LIMIT_REQUESTS=10              # max run starts per IP...
+# RATE_LIMIT_WINDOW_SECONDS=60        # ...per this many seconds (429 + Retry-After beyond)
 ```
 
 ### 3. Start Redis Server
@@ -121,9 +130,22 @@ Open **[http://localhost:8000](http://localhost:8000)** in your browser.
 
 ---
 
+## 🧪 CI
+
+Every push to `main` and every PR runs the full 55-test suite on GitHub Actions against a real Redis 7 service — with placeholder API keys, because the suite is hermetic by construction (all LLM/search calls are mocked at module boundaries). CI proves the pipeline's logic: schema contracts, graph routing, budget enforcement, persistence, citation validation, auth, and rate limiting — zero tokens spent.
+
+## 🔐 Production Guards
+
+- **Auth (opt-in):** set `API_AUTH_TOKEN` and every run-mutating endpoint (`POST /research`, `POST /research/{id}/resume`) requires `Authorization: Bearer <token>`; reads stay public.
+- **Rate limiting (always on, tunable):** per-IP sliding window over run starts — `RATE_LIMIT_REQUESTS` per `RATE_LIMIT_WINDOW_SECONDS` (default 10/60). Over the limit returns `429` with `Retry-After`.
+- **Streaming:** `GET /research/{id}/stream` is a Server-Sent Events endpoint that pushes a `state` frame on every persisted status change and closes on completion; the studio consumes it via `EventSource` and silently falls back to polling where SSE is unavailable.
+- **Run index:** recent-runs reads are O(log N + limit) from a Redis sorted set (`runs:index`), not a keyspace scan; the index self-heals stale or legacy entries.
+
+---
+
 ## 🧪 Test Suite & Verification
 
-Run the full automated test suite covering all 5 phases, deliberate failure paths, and schema guards:
+Run the full automated test suite covering all 5 phases, deliberate failure paths, schema guards, resilience, and production guards:
 
 ```bash
 .venv\Scripts\pytest -v
@@ -171,7 +193,7 @@ tests/test_schemas.py::test_source_record_and_finding PASSED
 tests/test_schemas.py::test_search_status PASSED
 tests/test_schemas.py::test_run_budget_exhaustion PASSED
 tests/test_schemas.py::test_run_state_defaults_and_validation PASSED
-============================= 41 passed in ~10s ==============================
+============================= 55 passed in ~11s ==============================
 ```
 
 ---
@@ -194,9 +216,13 @@ research_assistant/
 │   └── redis_store.py         # Phase 4: Redis state snapshotting & session history
 ├── tools/
 │   └── search.py              # Phase 3: Tavily search & Trafilatura extraction
-├── tests/                     # 41 automated unit & integration tests (incl. resilience)
+├── .github/
+│   └── workflows/
+│       └── ci.yml            # CI: 55 tests + real Redis service on push/PR
+├── tests/                     # 55 automated unit & integration tests (incl. resilience + production)
 ├── graph.py                   # Phase 2: LangGraph StateGraph, Supervisor & per-SQ fault isolation
 ├── llm.py                     # Gemini wrapper: exponential backoff + model fallback
-├── schemas.py                 # Core Pydantic contracts & budget bounds
+├── schemas.py                 # Core Pydantic contracts, budget bounds & finished_at
+├── api/main.py                # FastAPI endpoints, SSE stream, auth & rate limiting
 └── README.md                  # Project documentation & engineering blueprint
 ```

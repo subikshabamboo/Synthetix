@@ -28,11 +28,18 @@ THEORY on the two things this file is most careful about:
 """
 
 from __future__ import annotations
+
+import asyncio
 import os
 import threading
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+
+from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 
 from schemas import RunState
@@ -46,6 +53,75 @@ from storage.redis_store import (
 )
 
 app = FastAPI(title="Multi-Agent Research Assistant")
+
+# ---------------------------------------------------------------------------
+# SECURITY: optional API-key auth + per-IP rate limiting.
+#
+# THEORY: everything here is a guardrail on COST, not on secrets. A public
+# deployment without these lets any visitor mint unbounded Gemini tokens and
+# Tavily searches on your API keys. Both are opt-in-by-default-off so local
+# development and the test suite stay zero-config; setting API_AUTH_TOKEN
+# in the environment turns protection on for a deployment.
+# ---------------------------------------------------------------------------
+
+API_AUTH_TOKEN = os.environ.get("API_AUTH_TOKEN", "").strip()
+
+RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", "10"))
+RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "60"))
+
+# THEORY: sliding window over per-IP deques. A background-free approach —
+# the active window prunes itself on each request — keeps this honest
+# without a separate sweeper thread. In multi-worker deployments this
+# becomes per-worker (Redis-based limiting would be the next step), which
+# is still a strict improvement over none.
+_rate_lock = threading.Lock()
+_rate_buckets: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _client_ip(request: Request) -> str:
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _check_rate_limit(ip: str) -> tuple[bool, int]:
+    """Returns (allowed, retry_after_seconds)."""
+    now = time.monotonic()
+    window_start = now - RATE_LIMIT_WINDOW_SECONDS
+    with _rate_lock:
+        bucket = _rate_buckets[ip]
+        while bucket and bucket[0] < window_start:
+            bucket.popleft()
+        if len(bucket) >= RATE_LIMIT_REQUESTS:
+            retry_after = int(RATE_LIMIT_WINDOW_SECONDS - (now - bucket[0])) + 1
+            return False, max(retry_after, 1)
+        bucket.append(now)
+        return True, 0
+
+
+def enforce_public_guards(request: Request) -> None:
+    """
+    Shared dependency for run-mutating endpoints: rate limit first (cheap,
+    pre-auth, don't leak whether an endpoint exists), then bearer-token
+    check when API_AUTH_TOKEN is configured. 429 carries Retry-After.
+    """
+    allowed, retry_after = _check_rate_limit(_client_ip(request))
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many research runs from this address. Please wait before retrying.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    if API_AUTH_TOKEN:
+        auth = request.headers.get("Authorization", "")
+        scheme, token = get_authorization_scheme_param(auth)
+        if scheme.lower() != "bearer" or token != API_AUTH_TOKEN:
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized: supply 'Authorization: Bearer <API_AUTH_TOKEN>'.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
 
 # THEORY: BackgroundTasks gives no uniqueness guarantee — a client that
 # retries POST /research (or opens two tabs) while a run is mid-flight
@@ -108,6 +184,7 @@ def _run_in_background(run_id: str):
         state = load_state(run_id)
         if state is not None:
             state.status = "failed"
+            state.finished_at = datetime.now(timezone.utc)
             state.trace.append(
                 {
                     "node": "api",
@@ -121,7 +198,8 @@ def _run_in_background(run_id: str):
             _INFLIGHT_RUNS.discard(run_id)
 
 
-@app.post("/research", response_model=ResearchAck)
+@app.post("/research", response_model=ResearchAck,
+          dependencies=[Depends(enforce_public_guards)])
 def start_research(req: ResearchRequest, background_tasks: BackgroundTasks):
     state = get_or_create(req.run_id, req.question)
     if state.status not in ("done", "failed", "failed_citation_validation"):
@@ -129,7 +207,8 @@ def start_research(req: ResearchRequest, background_tasks: BackgroundTasks):
     return ResearchAck(run_id=state.run_id, status=state.status)
 
 
-@app.post("/research/{run_id}/resume", response_model=ResearchAck)
+@app.post("/research/{run_id}/resume", response_model=ResearchAck,
+          dependencies=[Depends(enforce_public_guards)])
 def resume_research(run_id: str, background_tasks: BackgroundTasks):
     state = load_state(run_id)
     if state is None:
@@ -156,6 +235,15 @@ def get_recent_runs():
     result = []
     for r in runs:
         findings_count = sum(len(res.findings) for res in r.results) if r.results else 0
+        # Measured end-to-end latency for terminal runs, live elapsed for
+        # in-flight ones — makes the README's latency claims checkable.
+        started_at = r.budget.started_at if r.budget and r.budget.started_at else None
+        if started_at and started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        duration_seconds = None
+        if started_at:
+            end = r.finished_at or datetime.now(timezone.utc)
+            duration_seconds = round((end - started_at).total_seconds(), 1)
         result.append({
             "run_id": r.run_id,
             "question": r.question,
@@ -164,7 +252,8 @@ def get_recent_runs():
             "searches_used": r.budget.searches_used if r.budget else 0,
             "findings_count": findings_count,
             "sub_questions_count": len(r.plan.sub_questions) if r.plan else 0,
-            "started_at": r.budget.started_at.isoformat() if r.budget and r.budget.started_at else None,
+            "started_at": started_at.isoformat() if started_at else None,
+            "duration_seconds": duration_seconds,
             "has_report": r.report is not None,
         })
     return {"runs": result}
@@ -245,6 +334,61 @@ def health():
     # A server that answers while Redis is down is a lie for this app:
     # every state read/write would 500 mid-request. Surface the dependency.
     return {"ok": True, "redis": ping()}
+
+
+@app.get("/research/{run_id}/stream")
+async def stream_research(run_id: str):
+    """
+    Server-Sent Events stream of run state transitions.
+
+    THEORY: replaces the frontend's blind 1.5s polling with push. The
+    generator tail-polls the authoritative store (Redis) at 1s — cheap
+    GETs of one key, no pub/sub fan-out to get wrong — and emits an
+    `event: state` frame only when the persisted status actually changes,
+    plus the final full state. SSE (not WebSockets) because the data
+    flows one way, it traverses proxies cleanly, and EventSource just
+    reconnects for free. Heartbeat comments keep intermediaries from
+    reaping idle connections.
+    """
+    state = load_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="run_id not found")
+
+    async def event_stream():
+        last_status = None
+        last_payload = ""
+        # Terminal statuses also include failed_citation_validation, which
+        # only exists in API responses, not persisted state — so "done"
+        # is emitted once with the full payload and the loop exits.
+        terminal = {"done", "failed"}
+        tick = 0
+        while True:
+            s = load_state(run_id)
+            if s is None:
+                yield "event: gone\ndata: {}\n\n"
+                return
+            payload = s.model_dump_json()
+            if s.status != last_status or (s.status in terminal and payload != last_payload):
+                last_status = s.status
+                last_payload = payload
+                yield f"event: state\ndata: {payload}\n\n"
+                if s.status in terminal and s.report is not None:
+                    return
+                if s.status == "failed":
+                    return
+            tick += 1
+            if tick % 15 == 0:
+                yield ": heartbeat\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # don't let nginx buffer the stream
+        },
+    )
 
 
 # Mount Static Files for the Frontend UI
