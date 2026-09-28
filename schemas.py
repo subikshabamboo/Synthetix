@@ -111,10 +111,22 @@ class Citation(BaseModel):
     finding_id: str  # references a Finding actually produced during the run
 
 
+class ReportSection(BaseModel):
+    """One titled section of the synthesized report body."""
+    heading: str
+    body: str
+
+
 class Report(BaseModel):
     """Output of the Writer agent."""
     question: str
     summary: str
+    # THEORY: sections/conclusion are optional-with-defaults so older runs
+    # persisted in Redis (and minimal writer calls) still validate. The
+    # frontend Studio renders them when present — before they were added
+    # here, the model was asked for structure the schema then threw away.
+    sections: list[ReportSection] = []
+    conclusion: str | None = None
     citations: list[Citation]
 
 

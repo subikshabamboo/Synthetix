@@ -34,7 +34,7 @@ from typing import TypedDict, Literal
 from datetime import datetime, timezone
 from langgraph.graph import StateGraph, START, END
 
-from schemas import RunState, ResearchResult
+from schemas import RunState, ResearchResult, SearchStatus
 from agents.planner import plan as run_planner
 from agents.researcher import research_sub_question
 from agents.writer import write_report
@@ -98,7 +98,24 @@ def node_researcher(g: GraphState) -> dict:
             _log(state, "researcher", f"budget exhausted, stopping before {sq.id}")
             break
 
-        result, tokens = research_sub_question(sq.id, sq.question)
+        # THEORY: per-sub-question fault isolation. `research_sub_question`
+        # already converts search failures into structured `SearchStatus`
+        # data — but an LLM extraction failure raised *above* that seam
+        # (planner proved 503 storms happen in practice) would escape this
+        # node and kill the whole run. That is exactly the fragile failure
+        # mode SearchStatus exists to prevent, so we honor the contract
+        # here too: a failed sub-question becomes a failed ResearchResult,
+        # the supervisor sees the gap and spends its one revision on it,
+        # and the writer still ships a report from whatever evidence exists.
+        try:
+            result, tokens = research_sub_question(sq.id, sq.question)
+        except Exception as e:
+            result = ResearchResult(
+                sub_question_id=sq.id,
+                status=SearchStatus(ok=False, reason="error", detail=str(e)),
+                findings=[],
+            )
+            tokens = 0
         state.budget.tokens_used += tokens
         state.budget.searches_used += 1
 

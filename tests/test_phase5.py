@@ -28,7 +28,9 @@ client = TestClient(app)
 def test_health_endpoint():
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"ok": True}
+    body = resp.json()
+    assert body["ok"] is True
+    assert "redis" in body  # health surfaces the Redis dependency state
 
 
 def test_citation_validation_logic_success():

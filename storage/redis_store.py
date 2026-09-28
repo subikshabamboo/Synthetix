@@ -54,7 +54,18 @@ def _key(run_id: str) -> str:
 
 
 def save_state(state: RunState) -> None:
+    # No TTL: the store is the durable record of every run, the source of
+    # resume-on-crash, and the "Saved Research Reports" list in the UI.
+    # Expiring keys would silently corrupt all three.
     _r().set(_key(state.run_id), state.model_dump_json())
+
+
+def ping() -> bool:
+    """Dependency check for /health — True iff Redis answers PING."""
+    try:
+        return bool(_r().ping())
+    except Exception:
+        return False
 
 
 def load_state(run_id: str) -> RunState | None:
@@ -123,7 +134,10 @@ def list_recent_runs(limit: int = 15) -> list[RunState]:
     Scans for 'run:*' keys and returns the most recent runs (parsed as RunState).
     """
     try:
-        keys = _r().keys("run:*")
+        # scan_iter instead of KEYS: KEYS blocks the Redis event loop for
+        # the full keyspace scan; SCAN increments incrementally and keeps
+        # the server responsive as the run history grows.
+        keys = list(_r().scan_iter(match="run:*", count=100))
     except Exception:
         return []
 

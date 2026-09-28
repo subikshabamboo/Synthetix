@@ -17,6 +17,7 @@ inside every agent file.
 from __future__ import annotations
 import json
 import os
+import time
 from typing import TypeVar, Type
 from pydantic import BaseModel, ValidationError
 from dotenv import load_dotenv
@@ -83,15 +84,29 @@ def call_structured(
         max_output_tokens=max_tokens,
     )
 
+    # THEORY: model fallback exists for availability, not laziness. The
+    # configured model is tried to exhaustion first; alternates only join
+    # the queue when it is genuinely gone (404) or still overloaded after
+    # full exponential backoff. Real 503 "high demand" storms need longer
+    # waits (2s, 4s, 8s, 16s) — a 3s-max retry loses that race every time,
+    # which is exactly how a healthy pipeline died mid-run in practice.
+    # Alternate list = live-model lineup verified against the real API in
+    # Sep 2026 (gemini-2.x is retired; the API points at 3.8-flash). A
+    # 404 fails that model instantly (no sleep), so extras are cheap.
     models_to_try = [MODEL]
-    for alt in ["gemini-flash-latest", "gemini-3.5-flash", "gemini-3.1-flash-lite"]:
+    for alt in ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"]:
         if alt not in models_to_try:
             models_to_try.append(alt)
 
     last_err = None
     response = None
-    for model_name in models_to_try:
-        for attempt in range(3):
+    for model_index, model_name in enumerate(models_to_try):
+        # THEORY: bounded retry spend. The configured model earns the full
+        # exponential ladder (2/4/8/16s ≈ 30s worst case); each alternate
+        # gets only two quick attempts (~2s apart) so a total outage can't
+        # burn the run's 240s wall-clock budget on retries alone.
+        attempts_for_model = 4 if model_index == 0 else 2
+        for attempt in range(attempts_for_model):
             try:
                 response = client.models.generate_content(
                     model=model_name,
@@ -103,16 +118,26 @@ def call_structured(
                 last_err = e
                 err_str = str(e).lower()
                 if "503" in err_str or "unavailable" in err_str or "429" in err_str or "rate" in err_str or "demand" in err_str:
-                    import time
-                    time.sleep(2 ** attempt + 1)
+                    time.sleep(2 if model_index > 0 else min(2 ** (attempt + 1), 16))
                     continue
                 elif "404" in err_str or "not_found" in err_str:
-                    # Model not available, try next candidate model
+                    # Model not available at all — no point retrying it.
                     break
                 else:
                     raise LLMStructuredOutputError(f"Gemini API call failed: {e}") from e
         if response is not None:
             break
+        # After the primary exhausts its ladder, promote the alternates as
+        # last resorts instead of failing on the endpoint that just proved
+        # it is overloaded — models have independent capacity pools. A
+        # non-availability error (bad key, malformed request) must NOT be
+        # masked by fallbacks: fail loudly instead.
+        if model_index == 0 and last_err is not None:
+            err_str = str(last_err).lower()
+            overloaded = "503" in err_str or "unavailable" in err_str or "429" in err_str or "demand" in err_str
+            gone = "404" in err_str or "not_found" in err_str
+            if not (overloaded or gone):
+                break  # a non-availability error: fail loudly, don't mask it
 
     if response is None and last_err is not None:
         raise LLMStructuredOutputError(f"Gemini API call failed after retries: {last_err}") from last_err

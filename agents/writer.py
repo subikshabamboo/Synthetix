@@ -26,9 +26,10 @@ and a source_url.
 
 Your task:
 1. Write an executive summary that synthesizes the findings into a clear, direct answer.
-2. Structure detailed sections if appropriate.
-3. Produce a citations list: for each claim you cite, you MUST copy the EXACT finding_id and the EXACT matching source_url from the findings list provided below.
-4. Invariant: NEVER invent a finding_id. NEVER pair a finding_id with a different source_url than the one listed for that finding_id.
+2. Organize detailed sections (heading + body) when the findings support more than a bare summary.
+3. Add a short conclusion with practical takeaways when warranted.
+4. Produce a citations list: for each claim you cite, you MUST copy the EXACT finding_id and the EXACT matching source_url from the findings list provided below.
+5. Invariant: NEVER invent a finding_id. NEVER pair a finding_id with a different source_url than the one listed for that finding_id.
 """
 
 

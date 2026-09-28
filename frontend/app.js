@@ -435,7 +435,9 @@ function renderTrace(trace) {
     else if (node === "supervisor") badgeClass = "node-supervisor";
     else if (node === "writer") badgeClass = "node-writer";
 
-    const timestamp = item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : "";
+    // Trace entries carry their time in `at` (ISO 8601 from graph._log),
+    // not `timestamp` — before this fix the timeline rendered blank clocks.
+    const timestamp = item.at ? new Date(item.at).toLocaleTimeString() : "";
     const tokens = item.tokens_used_so_far ? `${item.tokens_used_so_far.toLocaleString()} tokens` : "";
 
     return `
@@ -484,7 +486,10 @@ async function loadRecentRuns() {
     }
 
     listEl.innerHTML = data.runs.map(r => {
-      const statusColor = r.status === "done" ? "#10b981" : r.status === "failed" ? "#ef4444" : "#6366f1";
+      const statusColor =
+        r.status === "done" ? "#10b981" :
+        (r.status === "failed" || r.status === "failed_citation_validation") ? "#ef4444" :
+        "#6366f1";
       return `
         <div class="run-history-item" onclick="loadRunById('${r.run_id}')">
           <div class="run-history-top">

@@ -29,6 +29,8 @@ THEORY on the two things this file is most careful about:
 
 from __future__ import annotations
 import os
+import threading
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -40,9 +42,19 @@ from storage.redis_store import (
     load_state,
     save_state,
     list_recent_runs,
+    ping,
 )
 
 app = FastAPI(title="Multi-Agent Research Assistant")
+
+# THEORY: BackgroundTasks gives no uniqueness guarantee — a client that
+# retries POST /research (or opens two tabs) while a run is mid-flight
+# would launch two identical graph executions and double-spend tokens.
+# The Redis idempotency in get_or_create only covers re-entry AFTER a
+# run finishes; this in-flight set covers re-entry DURING one. FastAPI
+# runs sync endpoints on a threadpool, so the guard needs a real lock.
+_INFLIGHT_RUNS: set[str] = set()
+_inflight_lock = threading.Lock()
 
 
 class ResearchRequest(BaseModel):
@@ -82,6 +94,10 @@ def _validate_citations(state: RunState) -> list[str]:
 
 
 def _run_in_background(run_id: str):
+    with _inflight_lock:
+        if run_id in _INFLIGHT_RUNS:
+            return  # an identical execution is already running
+        _INFLIGHT_RUNS.add(run_id)
     try:
         run_and_persist(run_id)
     except Exception as e:
@@ -92,8 +108,17 @@ def _run_in_background(run_id: str):
         state = load_state(run_id)
         if state is not None:
             state.status = "failed"
-            state.trace.append({"node": "api", "note": f"background run crashed: {e}"})
+            state.trace.append(
+                {
+                    "node": "api",
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    "note": f"background run crashed: {e}",
+                }
+            )
             save_state(state)
+    finally:
+        with _inflight_lock:
+            _INFLIGHT_RUNS.discard(run_id)
 
 
 @app.post("/research", response_model=ResearchAck)
@@ -111,7 +136,14 @@ def resume_research(run_id: str, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=404, detail="run_id not found")
     if state.status == "done":
         return ResearchAck(run_id=state.run_id, status=state.status)
-    
+
+    # THEORY: the wall-clock budget protects a single execution attempt,
+    # not the run's entire lifetime. A run that failed at minute 2 and is
+    # resumed at minute 30 must not inherit a dead clock — otherwise the
+    # researcher skips every sub-question and the "resume" produces an
+    # empty report (observed live during E2E verification). Explicit user
+    # intent to continue = a fresh attempt = restart the clock.
+    state.budget.started_at = datetime.now(timezone.utc)
     state.status = "planning" if state.plan is None else "researching"
     save_state(state)
     background_tasks.add_task(_run_in_background, state.run_id)
@@ -210,7 +242,9 @@ def corrupt_citation(run_id: str):
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    # A server that answers while Redis is down is a lie for this app:
+    # every state read/write would 500 mid-request. Surface the dependency.
+    return {"ok": True, "redis": ping()}
 
 
 # Mount Static Files for the Frontend UI

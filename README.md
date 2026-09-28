@@ -1,6 +1,6 @@
 # Synthetix — Autonomous Multi-Agent Research Platform
 
-> An autonomous multi-agent research pipeline orchestrated with LangGraph and Redis that reduces multi-source deep research from 15 minutes of manual browsing to under 45 seconds with 100% programmatic citation verification across 34 passing test suites.
+> An autonomous multi-agent research pipeline orchestrated with LangGraph and Redis that reduces multi-source deep research from 15 minutes of manual browsing to under 45 seconds (at nominal Gemini capacity; the 240s wall-clock guardrail absorbs provider 503 storms) with 100% programmatic citation verification across 41 passing tests.
 
 ![Synthetix Studio Overview](assets/synthetix_preview.png)
 
@@ -15,7 +15,8 @@
 | **Web Search Budget** | 2–5 targeted queries / run | Hard search ceiling: 15 queries |
 | **Supervisor Revisions** | At most 1 targeted gap query | Max 1 loop (prevents runaway spend) |
 | **Citation Integrity** | 100% verified against raw sources | Intercepts & rejects fabricated claims |
-| **Resumability** | Instant resume from last node | Zero duplicate tokens on crash/retry |
+| **Provider Fault Tolerance** | Survives Gemini 503 storms + per-sub-question LLM crashes | Exponential backoff, model fallback, structured error results |
+| **Resumability** | Instant resume from last node (fresh wall-clock budget on explicit resume) | Zero duplicate tokens on crash/retry |
 
 ---
 
@@ -129,6 +130,13 @@ Run the full automated test suite covering all 5 phases, deliberate failure path
 ```
 
 ```
+tests/test_resilience.py::test_call_structured_retries_through_503_storm PASSED
+tests/test_resilience.py::test_call_structured_falls_back_to_alternate_model_when_primary_overloaded PASSED
+tests/test_resilience.py::test_call_structured_does_not_mask_non_availability_errors PASSED
+tests/test_resilience.py::test_node_researcher_isolates_llm_crash_per_sub_question PASSED
+tests/test_resilience.py::test_api_does_not_double_start_run_already_in_flight PASSED
+tests/test_resilience.py::test_health_reports_redis_status PASSED
+tests/test_resilience.py::test_report_schema_preserves_sections_and_conclusion PASSED
 tests/test_deliberate_breaks.py::test_break_1_kill_budget_on_purpose PASSED
 tests/test_deliberate_breaks.py::test_break_2_no_search_results_gibberish PASSED
 tests/test_deliberate_breaks.py::test_break_3_corrupt_citation_in_redis PASSED
@@ -163,7 +171,7 @@ tests/test_schemas.py::test_source_record_and_finding PASSED
 tests/test_schemas.py::test_search_status PASSED
 tests/test_schemas.py::test_run_budget_exhaustion PASSED
 tests/test_schemas.py::test_run_state_defaults_and_validation PASSED
-============================= 34 passed in 2.86s ==============================
+============================= 41 passed in ~10s ==============================
 ```
 
 ---
@@ -175,9 +183,9 @@ research_assistant/
 ├── agents/
 │   ├── planner.py             # Phase 1: Sub-question decomposition
 │   ├── researcher.py          # Phase 1/3: Web query extraction & unique finding IDs
-│   └── writer.py              # Phase 1/5: Synthesized report & citation mapping
+│   └── writer.py              # Phase 1/5: Synthesized report, sections & citation mapping
 ├── api/
-│   └── main.py                # Phase 5: FastAPI async endpoints & citation validator
+│   └── main.py                # Phase 5: FastAPI endpoints, citation validator & in-flight guard
 ├── frontend/
 │   ├── index.html             # Clean Synthetix user interface & studio
 │   ├── styles.css             # Design tokens & responsive styles
@@ -186,9 +194,9 @@ research_assistant/
 │   └── redis_store.py         # Phase 4: Redis state snapshotting & session history
 ├── tools/
 │   └── search.py              # Phase 3: Tavily search & Trafilatura extraction
-├── tests/                     # 34 automated unit & integration tests
-├── graph.py                   # Phase 2: LangGraph StateGraph & Supervisor logic
-├── llm.py                     # Google Gemini client wrapper with exponential retry
+├── tests/                     # 41 automated unit & integration tests (incl. resilience)
+├── graph.py                   # Phase 2: LangGraph StateGraph, Supervisor & per-SQ fault isolation
+├── llm.py                     # Gemini wrapper: exponential backoff + model fallback
 ├── schemas.py                 # Core Pydantic contracts & budget bounds
 └── README.md                  # Project documentation & engineering blueprint
 ```
