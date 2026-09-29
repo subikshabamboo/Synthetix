@@ -273,6 +273,7 @@ def get_research(run_id: str):
         "plan": state.plan.model_dump() if state.plan else None,
         "results": [r.model_dump() for r in state.results] if state.results else [],
         "revision_count": state.revision_count,
+        "conflicts": state.conflicts,  # auditor output: cross-source contradictions
         "trace": state.trace,
     }
 

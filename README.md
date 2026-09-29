@@ -1,6 +1,6 @@
 # Synthetix — Autonomous Multi-Agent Research Platform
 
-> An autonomous multi-agent research pipeline orchestrated with LangGraph and Redis that reduces multi-source deep research from 15 minutes of manual browsing to under 45 seconds (at nominal Gemini capacity; the 240s wall-clock guardrail absorbs provider 503 storms) with 100% programmatic citation verification across 55 passing tests.
+> An autonomous multi-agent research pipeline orchestrated with LangGraph and Redis that reduces multi-source deep research from 15 minutes of manual browsing to under 45 seconds (at nominal Gemini capacity; the 240s wall-clock guardrail absorbs provider 503 storms) with 100% programmatic citation verification across 70 passing tests.
 
 [![CI](https://github.com/subikshabamboo/Synthetix/actions/workflows/ci.yml/badge.svg)](https://github.com/subikshabamboo/Synthetix/actions/workflows/ci.yml)
 
@@ -15,7 +15,9 @@
 | **End-to-End Latency** | 35–55 seconds | Wall-clock hard limit: 240s |
 | **Token Efficiency** | ~8,000–12,000 tokens / run | Hard budget ceiling: 150,000 tokens |
 | **Web Search Budget** | 2–5 targeted queries / run | Hard search ceiling: 15 queries |
-| **Supervisor Revisions** | At most 1 targeted gap query | Max 1 loop (prevents runaway spend) |
+| **Supervisor Revisions** | At most 1 targeted gap query — re-fanning ONLY still-missing sub-questions | Max 1 loop (prevents runaway spend) |
+| **Parallel Fan-Out** | All sub-questions researched concurrently (LangGraph `Send` API); wall-clock ≈ slowest sub-question, not the sum | Reducer-merged deltas; single join books spend once |
+| **Contradiction Detection** | Pairwise cross-source audit of every finding pair | Zero-LLM: negation / numeric / comparative rules — deterministic, cannot hallucinate conflicts |
 | **Citation Integrity** | 100% verified against raw sources | Intercepts & rejects fabricated claims |
 | **Provider Fault Tolerance** | Survives Gemini 503 storms + per-sub-question LLM crashes | Exponential backoff, model fallback, structured error results |
 | **Resumability** | Instant resume from last node (fresh wall-clock budget on explicit resume) | Zero duplicate tokens on crash/retry |
@@ -35,12 +37,13 @@ flowchart TD
     API --> PlanNode["1. Planner Agent"]
     
     subgraph Execution_Pipeline ["LangGraph Orchestrated Pipeline"]
-        PlanNode -->|"Decomposed Sub-Questions"| ResNode["2. Researcher Agent"]
-        ResNode <-->|"Live Search & Extraction"| Tavily["Tavily Search + Trafilatura"]
-        ResNode -->|"Atomic Finding Records"| SupNode{"3. Supervisor Review"}
+        PlanNode -->|"Send API: one worker per sub-question"| Workers["2. Research Workers ×N (parallel map)"]
+        Workers <-->|"Live Search & Extraction"| Tavily["Tavily Search + Trafilatura"]
+        Workers -->|"Reducer-merged result deltas"| SupNode{"3. Supervisor Review (join)"}
         
-        SupNode -->|"Evidence Gap (Max 1 Loop)"| ResNode
-        SupNode -->|"Full Coverage or Budget Limit"| WriteNode["4. Synthesis Writer"]
+        SupNode -->|"Evidence Gap: re-fan ONLY missing (Max 1 Loop)"| Workers
+        SupNode -->|"Full Coverage or Budget Limit"| AudNode["3b. Contradiction Auditor"]
+        AudNode -->|"Cross-Source Conflicts Flagged"| WriteNode["4. Synthesis Writer"]
     end
 
     WriteNode --> ValNode["5. Citation Validation Engine"]
@@ -66,6 +69,14 @@ flowchart TD
 ### 3. Programmatic Citation Integrity vs. Trusting Prompt Output
 * **Decision**: The final report endpoint does not trust the LLM's cited claims. It programmatically validates every citation against the raw `Finding` dictionary before returning a 200 response.
 * **Trade-off**: We rejected standard unconstrained LLM text generation in exchange for a mathematical anti-hallucination guarantee: if a single citation references an unknown finding ID or altered source URL, the backend intercepts it with `failed_citation_validation`.
+
+### 4. Delta-Only Node Contract for Parallel Workers
+* **Decision**: Under the map-reduce fan-out, every graph node returns a DELTA — its own result, its own trace entry, its own spend — and reducer channels (`add`) merge concurrent worker output. The supervisor is the single JOIN point that books cumulative worker spend into the authoritative budget exactly once and re-fans only still-missing sub-questions on its one revision pass.
+* **Trade-off**: Nodes may no longer return full-state snapshots (doing so through an `add`-reducer duplicates the whole list — the classic LangGraph bug) in exchange for concurrency that is safe by construction, not by convention.
+
+### 5. Contradiction Auditor as Pure Code vs. a Detector Prompt
+* **Decision**: The auditor node cross-checks finding pairs from different sub-questions with deterministic rules — negation pairs with high lexical overlap, incompatible numbers (>15% apart) about the same quantity, opposing comparatives between the same entities. Hedged claims are stripped of hedges first so softening can't dodge the check.
+* **Trade-off**: We gave up the illusion of an LLM "understanding" contradictions in exchange for zero tokens, zero latency cost, unit-testable rules, and — crucially — no hallucinated conflicts. Flagged disagreements stay in the report with both citations so the reader weighs them; the UI surfaces them in a banner.
 
 ---
 
@@ -132,7 +143,7 @@ Open **[http://localhost:8000](http://localhost:8000)** in your browser.
 
 ## 🧪 CI
 
-Every push to `main` and every PR runs the full 55-test suite on GitHub Actions against a real Redis 7 service — with placeholder API keys, because the suite is hermetic by construction (all LLM/search calls are mocked at module boundaries). CI proves the pipeline's logic: schema contracts, graph routing, budget enforcement, persistence, citation validation, auth, and rate limiting — zero tokens spent.
+Every push to `main` and every PR runs the full 70-test suite on GitHub Actions against a real Redis 7 service — with placeholder API keys, because the suite is hermetic by construction (all LLM/search calls are mocked at module boundaries). CI proves the pipeline's logic: schema contracts, graph routing, parallel fan-out, budget enforcement, contradiction detection, persistence, citation validation, auth, and rate limiting — zero tokens spent.
 
 ## 🔐 Production Guards
 
@@ -151,6 +162,9 @@ Run the full automated test suite covering all 5 phases, deliberate failure path
 .venv\Scripts\pytest -v
 ```
 
+<details>
+<summary><strong>Full 70-test listing</strong></summary>
+
 ```
 tests/test_resilience.py::test_call_structured_retries_through_503_storm PASSED
 tests/test_resilience.py::test_call_structured_falls_back_to_alternate_model_when_primary_overloaded PASSED
@@ -167,10 +181,25 @@ tests/test_phase1.py::test_planner_agent PASSED
 tests/test_phase1.py::test_researcher_with_stub_search PASSED
 tests/test_phase1.py::test_writer_with_findings PASSED
 tests/test_phase1.py::test_writer_with_no_findings_returns_insufficient_evidence PASSED
-tests/test_phase2.py::test_supervisor_routes_to_writer_on_full_coverage PASSED
+tests/test_phase2.py::test_supervisor_routes_to_auditor_on_full_coverage PASSED
 tests/test_phase2.py::test_supervisor_routes_to_researcher_once_on_gap PASSED
 tests/test_phase2.py::test_supervisor_proceeds_to_writer_when_budget_dead PASSED
 tests/test_phase2.py::test_full_graph_execution_with_mocks PASSED
+tests/test_parallel_and_auditor.py::test_router_emits_one_send_per_sub_question PASSED
+tests/test_parallel_and_auditor.py::test_router_skips_research_entirely_when_budget_dead PASSED
+tests/test_parallel_and_auditor.py::test_worker_delta_contract PASSED
+tests/test_parallel_and_auditor.py::test_worker_skips_already_covered_sub_question PASSED
+tests/test_parallel_and_auditor.py::test_supervisor_books_cumulative_worker_spend_once PASSED
+tests/test_parallel_and_auditor.py::test_refan_targets_only_missing_sub_questions PASSED
+tests/test_parallel_and_auditor.py::test_full_graph_fans_out_and_merges_three_workers PASSED
+tests/test_parallel_and_auditor.py::test_auditor_detects_negation_contradiction_across_sources PASSED
+tests/test_parallel_and_auditor.py::test_auditor_detects_numeric_disagreement PASSED
+tests/test_parallel_and_auditor.py::test_auditor_detects_opposing_comparative PASSED
+tests/test_parallel_and_auditor.py::test_auditor_skips_same_sub_question_pairs PASSED
+tests/test_parallel_and_auditor.py::test_auditor_accepts_numbers_within_tolerance PASSED
+tests/test_parallel_and_auditor.py::test_auditor_sees_through_hedged_claims PASSED
+tests/test_parallel_and_auditor.py::test_auditor_two_negated_claims_agree_not_conflict PASSED
+tests/test_parallel_and_auditor.py::test_auditor_sets_writing_status_and_counts_findings PASSED
 tests/test_phase3.py::test_dedup_and_cap PASSED
 tests/test_phase3.py::test_fetch_and_extract_success PASSED
 tests/test_phase3.py::test_fetch_and_extract_paywall_or_error PASSED
@@ -193,8 +222,10 @@ tests/test_schemas.py::test_source_record_and_finding PASSED
 tests/test_schemas.py::test_search_status PASSED
 tests/test_schemas.py::test_run_budget_exhaustion PASSED
 tests/test_schemas.py::test_run_state_defaults_and_validation PASSED
-============================= 55 passed in ~11s ==============================
+============================= 70 passed in ~13s ==============================
 ```
+
+</details>
 
 ---
 
@@ -219,8 +250,8 @@ research_assistant/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml            # CI: 55 tests + real Redis service on push/PR
-├── tests/                     # 55 automated unit & integration tests (incl. resilience + production)
-├── graph.py                   # Phase 2: LangGraph StateGraph, Supervisor & per-SQ fault isolation
+├── tests/                     # 70 automated unit & integration tests (incl. resilience + production)
+├── graph.py                   # Phase 2 + stretch: Send-API parallel fan-out, supervisor join, contradiction auditor
 ├── llm.py                     # Gemini wrapper: exponential backoff + model fallback
 ├── schemas.py                 # Core Pydantic contracts, budget bounds & finished_at
 ├── api/main.py                # FastAPI endpoints, SSE stream, auth & rate limiting

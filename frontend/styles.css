@@ -1233,7 +1233,64 @@ body {
 .node-planner { background: #4338ca; color: #e0e7ff; }
 .node-researcher { background: #0369a1; color: #e0f2fe; }
 .node-supervisor { background: #b45309; color: #fef3c7; }
+.node-auditor { background: #7c3aed; color: #ede9fe; }
 .node-writer { background: #047857; color: #d1fae5; }
+
+/* Cross-source contradiction banner (auditor node output) */
+.conflict-banner {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius-md, 12px);
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+.conflict-banner-title {
+  font-family: var(--font-display, sans-serif);
+  font-size: 1rem;
+  font-weight: 800;
+  color: #92400e;
+  margin-bottom: 0.35rem;
+}
+.conflict-banner-sub {
+  font-size: 0.82rem;
+  color: #a16207;
+  margin-bottom: 0.9rem;
+}
+.conflict-card {
+  background: #ffffff;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-sm, 8px);
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.6rem;
+}
+.conflict-reason {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #b45309;
+  margin-bottom: 0.5rem;
+}
+.conflict-claim { padding: 0.35rem 0; }
+.conflict-claim-meta {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+  color: #64748b;
+  margin-bottom: 0.2rem;
+}
+.conflict-claim-meta a { color: #0284c7; text-decoration: none; word-break: break-all; }
+.conflict-claim-text { font-size: 0.88rem; color: #1e293b; font-weight: 600; }
+.conflict-vs {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #dc2626;
+  padding: 0.15rem 0;
+}
 .node-api { background: #be123c; color: #ffe4e6; }
 
 .trace-timestamp {

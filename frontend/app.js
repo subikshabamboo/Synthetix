@@ -267,6 +267,9 @@ function renderRunState(state) {
   // 5. Render Report
   renderReport(state);
 
+  // 5b. Render Cross-Source Contradictions (auditor output)
+  renderConflicts(state.conflicts);
+
   // 6. Update Trace
   if (state.trace && state.trace.length > 0) {
     renderTrace(state.trace);
@@ -285,8 +288,11 @@ function renderRunState(state) {
  * Update Stepper Node States
  */
 function updateStepper(status) {
+  // "auditing" is the contradiction-auditor pass between research and
+  // writing; visually it maps onto the Reviewing step.
   const steps = ["planning", "researching", "reviewing", "writing", "done"];
   const stepIdx = steps.indexOf(status);
+  const displayIdx = status === "auditing" ? steps.indexOf("reviewing") : stepIdx;
 
   steps.forEach((step, idx) => {
     const el = document.getElementById(`step-${step}`);
@@ -307,12 +313,12 @@ function updateStepper(status) {
         el.classList.add("failed");
         statusText.innerText = "Validation Alert";
       }
-    } else if (idx < stepIdx || status === "done") {
+    } else if (idx < displayIdx || status === "done") {
       el.classList.add("completed");
       statusText.innerText = "Completed";
-    } else if (idx === stepIdx) {
+    } else if (idx === displayIdx) {
       el.classList.add("active");
-      statusText.innerText = "Active...";
+      statusText.innerText = status === "auditing" ? "Auditing..." : "Active...";
     } else {
       statusText.innerText = "Pending";
     }
@@ -496,6 +502,64 @@ function renderReport(state) {
 }
 
 /**
+ * Render Cross-Source Contradictions detected by the auditor node.
+ * Shown above the report: the auditor flags disagreements BETWEEN sources
+ * (negation pairs, incompatible numbers, opposing comparatives) so the
+ * reader can weigh them; findings still flow into the report unchanged.
+ */
+function renderConflicts(conflicts) {
+  const container = document.getElementById("reportContainer");
+  if (!container || !conflicts || conflicts.length === 0) return;
+
+  // renderReport rebuilds the container on terminal states; in between
+  // (status ticks with no report yet) drop any banner we rendered before.
+  const existing = document.getElementById("conflictBanner");
+  if (existing) existing.remove();
+
+  const REASON_LABELS = {
+    negation: "Directly opposing statements",
+    numeric_disagreement: "Incompatible numbers for the same metric",
+    opposing_comparative: "Opposing comparisons between the same entities",
+  };
+
+  const cards = conflicts.map(c => {
+    const label = REASON_LABELS[c.reason] || (c.reason || "Conflict").replace(/_/g, " ");
+    const row = (side) => `
+      <div class="conflict-claim">
+        <div class="conflict-claim-meta">
+          <code>${escapeHtml(c[side].finding_id)}</code>
+          <a href="${escapeHtml(c[side].source_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c[side].source_url)}</a>
+        </div>
+        <div class="conflict-claim-text">"${escapeHtml(c[side].claim)}"</div>
+      </div>
+    `;
+    return `
+      <div class="conflict-card">
+        <div class="conflict-reason">⚠ ${escapeHtml(label)}</div>
+        ${row("claim_a")}
+        <div class="conflict-vs">vs</div>
+        ${row("claim_b")}
+      </div>
+    `;
+  }).join("");
+
+  const banner = document.createElement("div");
+  banner.id = "conflictBanner";
+  banner.innerHTML = `
+    <div class="conflict-banner">
+      <div class="conflict-banner-title">
+        ⚡ ${conflicts.length} cross-source contradiction${conflicts.length > 1 ? "s" : ""} detected
+      </div>
+      <p class="conflict-banner-sub">
+        The auditor flagged the disagreements below between sources. They remain in the report with their citations — weigh them yourself.
+      </p>
+      ${cards}
+    </div>
+  `;
+  container.prepend(banner);
+}
+
+/**
  * Render Step-Level Trace Timeline
  */
 function renderTrace(trace) {
@@ -508,6 +572,7 @@ function renderTrace(trace) {
     if (node === "planner") badgeClass = "node-planner";
     else if (node === "researcher") badgeClass = "node-researcher";
     else if (node === "supervisor") badgeClass = "node-supervisor";
+    else if (node === "auditor") badgeClass = "node-auditor";
     else if (node === "writer") badgeClass = "node-writer";
 
     // Trace entries carry their time in `at` (ISO 8601 from graph._log),

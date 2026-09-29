@@ -50,9 +50,11 @@ def test_break_1_kill_budget_on_purpose():
     )
     assert state.budget.time_exhausted()
 
-    # Supervisor should proceed to writer with documented gap in trace rather than route back to researcher
+    # Supervisor should refuse to re-fan (dead budget) and hand off with a
+    # documented gap in trace rather than route back to researchers.
     result_dict = node_supervisor(state.model_dump())
-    assert result_dict["status"] == "writing"
+    assert result_dict["status"] == "auditing"
+    assert "_refan" not in result_dict  # dead budget: no more research
     assert any("proceeding to writer with gaps" in t["note"] for t in result_dict["trace"])
 
 

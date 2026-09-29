@@ -172,9 +172,14 @@ class RunState(BaseModel):
     """
     run_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     question: str
-    status: Literal["planning", "researching", "reviewing", "writing", "done", "failed"] = "planning"
+    status: Literal["planning", "researching", "reviewing", "auditing", "writing", "done", "failed"] = "planning"
     plan: ResearchPlan | None = None
     results: list[ResearchResult] = []
+    # Cross-source contradictions found by the auditor (spec stretch goal:
+    # "detect contradictions between sources"). Each entry: reason
+    # (negation / numeric_disagreement / opposing_comparative) + the two
+    # conflicting claims with their finding ids and source urls.
+    conflicts: list[dict] = []
     report: Report | None = None
     budget: RunBudget = Field(default_factory=RunBudget)
     trace: list[dict] = []  # Phase 5: step-level log, see storage/trace.py later

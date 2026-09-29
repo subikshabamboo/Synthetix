@@ -20,7 +20,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from api.main import app, _INFLIGHT_RUNS, _inflight_lock
-from graph import node_researcher
+from graph import node_research_worker
 from llm import LLMCallResult, LLMStructuredOutputError
 from schemas import (
     ResearchPlan,
@@ -140,40 +140,35 @@ def test_call_structured_does_not_mask_non_availability_errors(monkeypatch):
 def test_node_researcher_isolates_llm_crash_per_sub_question():
     """
     THE live-E2E failure: one sub-question raising during LLM extraction
-    killed the whole run. Now it must become a structured error result
-    and the remaining sub-questions must still be researched.
+    killed the whole run. In the parallel architecture each sub-question
+    runs in its own worker node, so a crash is contained to that worker:
+    it must return a structured error DELTA (not raise past the node) and
+    the other workers are unaffected by construction.
     """
-    ok_result = ResearchResult(
-        sub_question_id="sq1",
-        status=SearchStatus(ok=True, reason="ok"),
-        findings=[],
-    )
-
-    def fake_research(sq_id, question):
-        if sq_id == "sq1":
-            return ok_result, 10
+    def boom(sq_id, question):
         raise LLMStructuredOutputError("Gemini API call failed after retries: 503")
 
     state = RunState(
         question="Test",
         plan=ResearchPlan(
             original_question="Test",
-            sub_questions=[
-                SubQuestion(id="sq1", question="Q1", rationale="R1"),
-                SubQuestion(id="sq2", question="Q2", rationale="R2"),
-            ],
+            sub_questions=[SubQuestion(id="sq1", question="Q1", rationale="R1")],
         ),
     )
 
-    with patch("graph.research_sub_question", side_effect=fake_research):
-        out = node_researcher(state.model_dump())
+    with patch("graph.research_sub_question", side_effect=boom):
+        out = node_research_worker({
+            "sub_question": state.plan.sub_questions[0].model_dump(),
+            "run_state": state.model_dump(),
+        })
 
-    assert out["status"] == "reviewing"  # run survives
-    assert len(out["results"]) == 2
-    failed = [r for r in out["results"] if r["sub_question_id"] == "sq2"][0]
+    failed = out["results"][0]
+    assert failed["sub_question_id"] == "sq1"
     assert failed["status"]["ok"] is False
     assert failed["status"]["reason"] == "error"
     assert "503" in failed["status"]["detail"]
+    assert out["_worker_tokens"] == 0
+    assert out["_worker_searches"] == 1  # the search attempt still counts
 
 
 def test_api_does_not_double_start_run_already_in_flight(monkeypatch):

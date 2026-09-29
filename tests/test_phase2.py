@@ -22,7 +22,7 @@ from schemas import (
 from graph import build_graph, run_research, node_supervisor, GraphState
 
 
-def test_supervisor_routes_to_writer_on_full_coverage():
+def test_supervisor_routes_to_auditor_on_full_coverage():
     state = RunState(
         question="Test question",
         plan=ResearchPlan(
@@ -45,7 +45,10 @@ def test_supervisor_routes_to_writer_on_full_coverage():
         ],
     )
     result_dict = node_supervisor(state.model_dump())
-    assert result_dict["status"] == "writing"
+    # Full coverage no longer means 'write now': the supervisor hands off
+    # to the contradiction auditor, which is what transitions to writing.
+    assert result_dict["status"] == "auditing"
+    assert "_refan" not in result_dict  # nothing to re-fan
     assert any("full coverage" in t["note"] for t in result_dict["trace"])
 
 
@@ -77,15 +80,20 @@ def test_supervisor_routes_to_researcher_once_on_gap():
         revision_count=0,
     )
 
-    # First pass: gap detected -> routes back to researcher (revision 1/1)
+    # First pass: gap detected -> re-fans ONLY the missing sub-question
     result_dict = node_supervisor(state.model_dump())
     assert result_dict["status"] == "researching"
     assert result_dict["revision_count"] == 1
+    assert [sq["id"] for sq in result_dict["_refan"]] == ["sq2"]  # sq1 not re-sent
 
-    # Second pass: still missing -> cannot loop again (max 1 retry) -> routes to writer
-    second_pass = node_supervisor(result_dict)
-    assert second_pass["status"] == "writing"
+    # Second pass: still missing -> cannot loop again (max 1 retry)
+    # -> hands off to auditor (which then flows to the writer)
+    merged = {**state.model_dump(), **result_dict}
+    second_pass = node_supervisor(merged)
+    assert second_pass["status"] == "auditing"
+    assert "_refan" not in second_pass
     assert second_pass["revision_count"] == 1
+    assert any("proceeding to writer with gaps" in t["note"] for t in second_pass["trace"])
 
 
 def test_supervisor_proceeds_to_writer_when_budget_dead():
@@ -102,7 +110,10 @@ def test_supervisor_proceeds_to_writer_when_budget_dead():
     state.budget.tokens_used = state.budget.max_total_tokens + 100
 
     result_dict = node_supervisor(state.model_dump())
-    assert result_dict["status"] == "writing"
+    # Dead budget means no re-fan, but the auditor still runs before the
+    # writer — 'proceeding to writer with gaps' happens via auditing.
+    assert result_dict["status"] == "auditing"
+    assert "_refan" not in result_dict
     assert any("budget_dead=True" in t["note"] for t in result_dict["trace"])
 
 
@@ -133,5 +144,6 @@ def test_full_graph_execution_with_mocks():
         assert final_state.status == "done"
         assert final_state.report is not None
         assert final_state.report.summary == "Summary of research."
-        assert len(final_state.trace) >= 4  # planner, researcher, supervisor, writer
-        assert final_state.budget.tokens_used == 180
+        assert len(final_state.trace) >= 5  # planner, researcher, supervisor, auditor, writer
+        assert final_state.budget.tokens_used == 180  # 50 plan + 60 worker + 70 write
+        assert final_state.conflicts == []
